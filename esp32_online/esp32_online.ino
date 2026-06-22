@@ -2,8 +2,8 @@
 // esp32_online.ino — dumb sensor + actuator node
 //
 // The ESP32 does NO signal processing. It just:
-//   1) samples 3 EMG channels at EMG_FS_HZ and ships raw ADC values
-//      to the computer as "R,t_us,raw0,raw1,raw2\n"
+//   1) samples 4 EMG channels at EMG_FS_HZ and ships raw ADC values
+//      to the computer as "R,t_us,grav,m1,m2,m3\n"
 //   2) listens for "A,angle_deg\n" lines from the computer and drives
 //      the servo to that angle (clamped to [ANGLE_MIN,ANGLE_MAX]).
 //
@@ -18,6 +18,7 @@
 static const int   ANALOG_PIN_GRAV = 32;
 static const int   ANALOG_PIN_M1   = 34;
 static const int   ANALOG_PIN_M2   = 35;
+static const int   ANALOG_PIN_M3   = 33;
 static const int   SERVO_PIN       = 18;
 static const long  SERIAL_BAUD     = 921600;
 
@@ -85,6 +86,7 @@ void loop() {
   int r0 = analogRead(ANALOG_PIN_GRAV);
   int r1 = analogRead(ANALOG_PIN_M1);
   int r2 = analogRead(ANALOG_PIN_M2);
+  int r3 = analogRead(ANALOG_PIN_M3);
 
-  Serial.printf("R,%lu,%d,%d,%d\n", now, r0, r1, r2);
+  Serial.printf("R,%lu,%d,%d,%d,%d\n", now, r0, r1, r2, r3);
 }

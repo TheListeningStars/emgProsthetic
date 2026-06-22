@@ -71,7 +71,7 @@ log_path = f"logs/liveTrain/live_train_{session_time}.csv"
 raw_log_path = f"logs/liveTrain/live_train_{session_time}_emg_raw.csv"
 
 # ====== SHARED STATE ========================================================
-emg_buf = deque(maxlen=EMG_WINDOW)   # (t, m1, m2, grav_env, grav_raw)
+emg_buf = deque(maxlen=EMG_WINDOW)   # (t, m1, m2, m3, grav_env, grav_raw)
 stop_flag = threading.Event()
 
 grav_proc = GravityEMGProcessor()
@@ -109,7 +109,7 @@ _fs_times = deque(maxlen=600)
 
 raw_csv_file = open(raw_log_path, "w", newline="")
 raw_writer = csv.writer(raw_csv_file)
-raw_writer.writerow(["timestamp", "t_mono", "m1", "m2", "grav_raw", "grav_env"])
+raw_writer.writerow(["timestamp", "t_mono", "m1", "m2", "m3", "grav_raw", "grav_env"])
 _raw_count = [0]
 
 
@@ -133,20 +133,21 @@ def emg_reader():
                 if not s.startswith("R,"):
                     continue
                 parts = s[2:].split(",")
-                if len(parts) != 4:
+                if len(parts) != 5:
                     continue
                 try:
                     grav_raw = int(parts[1])
                     m1 = int(parts[2])
                     m2 = int(parts[3])
+                    m3 = int(parts[4])
                 except ValueError:
                     continue
                 now = time.time()
                 _fs_times.append(now)
                 grav_env = grav_proc.push(grav_raw)
-                emg_buf.append((now, m1, m2, grav_env, grav_raw))
+                emg_buf.append((now, m1, m2, m3, grav_env, grav_raw))
                 raw_writer.writerow(
-                    [datetime.now().isoformat(), now, m1, m2, grav_raw, grav_env])
+                    [datetime.now().isoformat(), now, m1, m2, m3, grav_raw, grav_env])
                 _raw_count[0] += 1
                 if _raw_count[0] % 250 == 0:
                     raw_csv_file.flush()
@@ -506,9 +507,9 @@ def draw_dashboard(angle_val):
                   overlays=[(list(m.err_hist), m.color) for m in DISPLAY[1:]])
 
     ch_top = err_top + 8 + 50 + 26
-    text("EMG  m1 | m2 | gravity (envelope)", spx, ch_top, 0.5, COL_LABEL, 2)
-    cw = (DASH_W - 32 - 2 * 8) // 3
-    ch_cols = [(90, 230, 110), (90, 180, 255), (200, 120, 255)]
+    text("EMG  m1 | m2 | m3 | gravity (envelope)", spx, ch_top, 0.5, COL_LABEL, 2)
+    cw = (DASH_W - 32 - (N_CH - 1) * 8) // N_CH
+    ch_cols = [(90, 230, 110), (90, 180, 255), (200, 200, 90), (200, 120, 255)]
     for ci in range(N_CH):
         cx = spx + ci * (cw + 8)
         sparkline(img, list(ch_hist[ci]), cx, ch_top + 8, cw, 50, ch_cols[ci])
@@ -607,7 +608,7 @@ writer = csv.writer(csv_file)
 writer.writerow(
     ["timestamp", "t_mono", "angle_deg"]
     + [f"{m.name}_pred" for m in DISPLAY]
-    + ["m1", "m2", "grav_raw", "grav_env", "servo_src"]
+    + ["m1", "m2", "m3", "grav_raw", "grav_env", "servo_src"]
 )
 
 print(f"Logging to {log_path}")
@@ -692,8 +693,8 @@ try:
 
             if len(emg_buf) > 0:
                 last = emg_buf[-1]
-                ch_vals = [last[1], last[2], last[3]]
-                grav_raw_last = last[4]
+                ch_vals = [last[1], last[2], last[3], last[4]]  # m1, m2, m3, grav_env
+                grav_raw_last = last[5]
             else:
                 ch_vals = [float("nan")] * N_CH
                 grav_raw_last = float("nan")
@@ -708,7 +709,7 @@ try:
             writer.writerow(
                 [datetime.now().isoformat(), time.time(), angle_val]
                 + [(m.last_pred if m.last_pred is not None else "") for m in DISPLAY]
-                + [ch_vals[0], ch_vals[1], grav_raw_last, ch_vals[2],
+                + [ch_vals[0], ch_vals[1], ch_vals[2], grav_raw_last, ch_vals[3],
                    servo_select["name"]]
             )
             csv_file.flush()

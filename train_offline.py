@@ -56,9 +56,9 @@ def _parse_iso_to_unix(s):
 
 
 def load_session(main_csv):
-    """Returns (samples Nx4, angles Mx2) for one session.
+    """Returns (samples Nx5, angles Mx2) for one session.
 
-    samples columns: [t_mono, m1, m2, grav_env]
+    samples columns: [t_mono, m1, m2, m3, grav_env]
     angles  columns: [t_mono, angle_deg]
     """
     raw_csv = _raw_path_for(main_csv)
@@ -72,6 +72,7 @@ def load_session(main_csv):
                     float(row["t_mono"]),
                     float(row["m1"]),
                     float(row["m2"]),
+                    float(row["m3"]),
                     float(row["grav_env"]),
                 ))
             except (ValueError, KeyError):
@@ -111,11 +112,13 @@ def build_pairs(samples, angles, horizon_s=PRED_HORIZON_S, tol_s=0.05,
     """Slide an EMG_WINDOW over `samples`, pair each window end with the
     angle closest to (t_end + horizon_s) within tol_s.
 
-    Returns (feats Nx12, raws NxTxN_CH, ys N).  step=1 means snapshot at
-    every sample (heavy overlap = data augmentation for sequence nets).
+    Returns (feats Nx(4*N_CH), raws NxTxN_CH, ys N).  step=1 means snapshot
+    at every sample (heavy overlap = data augmentation for sequence nets).
     """
     if len(samples) < EMG_WINDOW or len(angles) == 0:
-        return (np.zeros((0, 12)), np.zeros((0, EMG_WINDOW, N_CH)), np.zeros(0))
+        return (np.zeros((0, 4 * N_CH)),
+                np.zeros((0, EMG_WINDOW, N_CH)),
+                np.zeros(0))
     angles = angles[angles[:, 0].argsort()]
     ang_ts = angles[:, 0]
 
@@ -123,7 +126,7 @@ def build_pairs(samples, angles, horizon_s=PRED_HORIZON_S, tol_s=0.05,
     raws = []
     ys = []
     for end in range(EMG_WINDOW, len(samples) + 1, step):
-        win = samples[end - EMG_WINDOW:end]   # (T, 4)
+        win = samples[end - EMG_WINDOW:end]   # (T, 1+N_CH)
         t_end = float(win[-1, 0])
         target_t = t_end + horizon_s
         idx = np.searchsorted(ang_ts, target_t)

@@ -1,6 +1,6 @@
 # emgProsthetic — closed-loop online training, ESP32 servo target
 
-Predict an ankle angle in real time from 3-channel surface EMG and drive a
+Predict an ankle angle in real time from 4-channel surface EMG and drive a
 servo with the prediction.  Five regression models (SGD, RLS, RF, LSTM, GRU)
 + an error-weighted ensemble train **continuously and in parallel** while the
 camera supplies ground-truth angle labels.  You pick which model drives the
@@ -14,7 +14,7 @@ samples and writes whatever angle the laptop tells it to.
 
 | | Laptop (`live_train.py`) | ESP32 (`esp32_online.ino`) |
 |---|---|---|
-| reads EMG (3 analog pins) | no | yes |
+| reads EMG (4 analog pins) | no | yes |
 | gravity-EMG filter chain  | yes | no |
 | 12-dim feature extraction | yes | no |
 | measures ankle angle      | yes (camera + clicked markers) | no |
@@ -39,11 +39,15 @@ saved model bundles.
 
 ## Hardware
 
-- ESP32 with three analog EMG inputs and one servo output:
+- ESP32 with four analog EMG inputs and one servo output:
   - `GPIO32` — Gravity Analog EMG (SEN0240), processed to envelope on the laptop
-  - `GPIO34` — m1 (raw EMG)
-  - `GPIO35` — m2 (raw EMG)
+  - `GPIO34` — m1 (MyoWare, raw EMG)
+  - `GPIO35` — m2 (MyoWare, raw EMG)
+  - `GPIO33` — m3 (MyoWare, raw EMG)
   - `GPIO18` — servo signal
+
+All four ADCs are on ADC1, so they keep working with WiFi on (ADC2 conflicts
+with WiFi).
 - Camera for the laptop (3 green markers on shin / ankle / foot for the
   ground-truth angle).
 
@@ -67,8 +71,8 @@ ESP32's port (e.g. `/dev/cu.usbserial-XXXX`).  Default baud is 921600.
 ## Serial protocol  (line-delimited ASCII, 921600 baud)
 
 ESP32 → laptop
-- `R,t_us,grav,m1,m2\n`   raw ADC sample at ~63.46 Hz
-- `S,<status>\n`          boot / info
+- `R,t_us,grav,m1,m2,m3\n`  raw ADC sample at ~63.46 Hz
+- `S,<status>\n`            boot / info
 
 Laptop → ESP32
 - `A,<angle_deg>\n`       drive servo to this angle (clamped on ESP32 too)
@@ -77,13 +81,13 @@ Laptop → ESP32
 
 All defined in `live_common.py` and trained in parallel.  Inputs:
 
-- **feature models** (12-dim engineered vector — RMS/MAV/VAR/WL per channel,
+- **feature models** (16-dim engineered vector — RMS/MAV/VAR/WL per channel,
   with `LEVEL` instead of `RMS` for the gravity envelope):
   - `SGD`  — `SGDRegressor`, constant LR, `partial_fit` every 10 labels
   - `RLS`  — recursive least squares (online ridge), forgetting factor 0.999
   - `RF`   — `RandomForestRegressor` (60 trees × depth 12), refit in a
              background thread every 25 new labels
-- **sequence models** (full `EMG_WINDOW=75` × 3 raw window, normalized):
+- **sequence models** (full `EMG_WINDOW=75` × 4 raw window, normalized):
   - `LSTM` — 2-layer, hidden 48, MLP head
   - `GRU`  — same shape as LSTM
 - **ensemble**:

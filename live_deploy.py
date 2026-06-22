@@ -147,17 +147,18 @@ def main():
                 if not s.startswith("R,"):
                     continue
                 parts = s[2:].split(",")
-                if len(parts) != 4:
+                if len(parts) != 5:
                     continue
                 try:
                     grav_raw = int(parts[1])
                     m1 = int(parts[2])
                     m2 = int(parts[3])
+                    m3 = int(parts[4])
                 except ValueError:
                     continue
                 now = time.time()
                 grav_env = grav_proc.push(grav_raw)
-                emg_buf.append((now, m1, m2, grav_env, grav_raw))
+                emg_buf.append((now, m1, m2, m3, grav_env, grav_raw))
                 if len(emg_buf) < EMG_WINDOW:
                     continue
                 if now - last_pred_t < PRED_EVERY_S:

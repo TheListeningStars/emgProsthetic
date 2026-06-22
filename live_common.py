@@ -3,7 +3,7 @@ save/load used by live_train.py, live_deploy.py, and train_offline.py.
 
 The single source of truth for:
   - the gravity-EMG filter chain (DC -> BP -> notch -> rectify -> envelope)
-  - the 12-dim feature vector layout (4 features x 3 channels: m1, m2, grav)
+  - the 16-dim feature vector layout (4 features x 4 channels: m1, m2, m3, grav)
   - the EMA normalizer state (features / raw / target)
   - all model classes (SGD, RLS, RF, LSTM, GRU, ENS)
   - bundle serialization (save_bundle / load_bundle)
@@ -39,9 +39,9 @@ except Exception as _e:
 
 
 # ====== I/O CONTRACT (must match esp32_online.ino + recordings) =============
-N_CH         = 3
-CH_NAMES     = ["m1", "m2", "grav"]
-GRAV_IDX     = 2
+N_CH         = 4
+CH_NAMES     = ["m1", "m2", "m3", "grav"]
+GRAV_IDX     = 3
 EMG_WINDOW   = 75
 ESP32_FS_HZ  = 63.4635
 
@@ -175,11 +175,11 @@ class GravityEMGProcessor:
 
 # ====== FEATURES ===========================================================
 def features_from_arr(arr):
-    """arr: [T, >=1+N_CH] — col 0 = timestamp, cols 1..N_CH = m1, m2, grav_env.
+    """arr: [T, >=1+N_CH] — col 0 = timestamp, cols 1..N_CH = m1, m2, m3, grav_env.
 
-    Returns a 12-dim feature vector: per channel,
-      m1/m2: RMS, MAV, VAR, WL of the mean-removed raw signal.
-      grav : LEVEL, MAV, VAR, WL of the envelope (level preserved).
+    Returns a 16-dim feature vector: per channel,
+      m1/m2/m3: RMS, MAV, VAR, WL of the mean-removed raw signal.
+      grav    : LEVEL, MAV, VAR, WL of the envelope (level preserved).
     """
     out = []
     for ci in range(1, 1 + N_CH):
