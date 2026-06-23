@@ -1,7 +1,7 @@
 # emgProsthetic — closed-loop online training, ESP32 servo target
 
 Predict an ankle angle in real time from 4-channel surface EMG and drive a
-servo with the prediction.  Five regression models (SGD, RLS, RF, LSTM, GRU)
+servo with the prediction.  Four regression models (RLS, RF, LSTM, GRU)
 + an error-weighted ensemble train **continuously and in parallel** while the
 camera supplies ground-truth angle labels.  You pick which model drives the
 servo with a trackbar.
@@ -83,12 +83,11 @@ All defined in `live_common.py` and trained in parallel.  Inputs:
 
 - **feature models** (16-dim engineered vector — RMS/MAV/VAR/WL per channel,
   with `LEVEL` instead of `RMS` for the gravity envelope):
-  - `SGD`  — `SGDRegressor`, constant LR, `partial_fit` every 10 labels
   - `RLS`  — recursive least squares (online ridge), forgetting factor 0.999
-  - `RF`   — `RandomForestRegressor` (60 trees × depth 12), refit in a
+  - `RF`   — `RandomForestRegressor` (120 trees × depth 20), refit in a
              background thread every 25 new labels
 - **sequence models** (full `EMG_WINDOW=75` × 4 raw window, normalized):
-  - `LSTM` — 2-layer, hidden 48, MLP head
+  - `LSTM` — 3-layer, hidden 80, MLP head
   - `GRU`  — same shape as LSTM
 - **ensemble**:
   - `ENS`  — error-weighted blend, weight ∝ 1 / (rolling_MAE + 1).  At deploy
@@ -143,20 +142,29 @@ direction flip), `--print-every` (seconds between status prints, 0 = silent),
 ### 3. Offline training  (retrain from scratch on logged data)
 
 ```bash
+# single horizon (saves bundle):
 python train_offline.py logs/liveTrain/live_train_20260622_140530.csv \
                         [more_sessions.csv ...] \
-                        --epochs 30
+                        --epochs 30 --horizon 0.15
+
+# horizon sweep (no bundle; just prints comparison table):
+python train_offline.py logs/liveTrain/live_train_*.csv \
+                        --horizons "0.05,0.10,0.15,0.20"
 ```
 
-Pairs every EMG window with the angle label closest to `t + PRED_HORIZON_S`
-(within `--tol-s`, default 50 ms), then trains:
-- SGD over `--epochs` passes of `partial_fit`
+Splits each session temporally (last `--val-frac`, default 20 %, held out
+for validation), then trains:
 - RLS in one streaming pass
-- RF as a single `fit` on the last 1200 pairs
+- RF as a single `fit` on the last 1500 pairs
 - LSTM + GRU in mini-batch epochs (`--no-seq` to skip)
 
+For every model the script prints **train MAE and val MAE** separately.
+Ensemble blend weights at deploy time use the val MAE (more honest than
+the train MAE).
+
 Each session CSV's matching `_emg_raw.csv` is found automatically.  Output
-bundle: `models/bundle_offline_<TS>.pkl` (loadable by `live_deploy.py`).
+bundle: `models/bundle_offline_<TS>.pkl` (loadable by `live_deploy.py`),
+with the trained horizon recorded in the bundle's `meta`.
 
 ## Notes / knobs
 

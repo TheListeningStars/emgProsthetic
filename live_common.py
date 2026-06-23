@@ -5,7 +5,7 @@ The single source of truth for:
   - the gravity-EMG filter chain (DC -> BP -> notch -> rectify -> envelope)
   - the 16-dim feature vector layout (4 features x 4 channels: m1, m2, m3, grav)
   - the EMA normalizer state (features / raw / target)
-  - all model classes (SGD, RLS, RF, LSTM, GRU, ENS)
+  - all model classes (RLS, RF, LSTM, GRU, ENS)
   - bundle serialization (save_bundle / load_bundle)
 
 Anything that affects the model contract lives here so the deploy script
@@ -18,7 +18,6 @@ import threading
 from collections import deque
 
 import numpy as np
-from sklearn.linear_model import SGDRegressor
 from sklearn.ensemble import RandomForestRegressor
 
 try:
@@ -61,29 +60,25 @@ FEAT_EMA_ALPHA = 1.0 / 200
 RAW_EMA_ALPHA  = 1.0 / 2000
 TGT_EMA_ALPHA  = 1.0 / 300
 
-SGD_ETA0       = 0.005
-RETRAIN_EVERY  = 10
-
 RLS_LAMBDA = 0.999
 RLS_P0     = 1e3
 
-RF_TREES       = 60
-RF_MAX_DEPTH   = 12
+RF_TREES       = 120
+RF_MAX_DEPTH   = 20
 RF_REFIT_EVERY = 25
-RF_REPLAY_MAX  = 1200
+RF_REPLAY_MAX  = 1500
 RF_MIN_SAMPLES = 40
 
-SEQ_HIDDEN          = 48
-SEQ_LAYERS          = 2
+SEQ_HIDDEN          = 80
+SEQ_LAYERS          = 3
 SEQ_LR              = 3e-3
 SEQ_WD              = 1e-4
 SEQ_BATCH           = 32
 SEQ_STEPS_PER_TICK  = 3
-REPLAY_MAX          = 1500
+REPLAY_MAX          = 2000
 
 # Display colors (BGR)
 COL_TRUE = (120, 220, 255)
-COL_SGD  = (60, 160, 255)
 COL_RLS  = (200, 120, 255)
 COL_RF   = (70, 220, 220)
 COL_LSTM = (90, 230, 110)
@@ -367,46 +362,6 @@ class BaseModel:
         self.trained = bool(data.get("trained", False))
 
 
-class SGDModel(BaseModel):
-    kind = "feat"
-
-    def __init__(self, name=("SGD"), color=COL_SGD, thick=2):
-        super().__init__(name, color, thick)
-        self.reg = SGDRegressor(alpha=1e-4, learning_rate="constant",
-                                eta0=SGD_ETA0)
-        self.pX = []
-        self.py = []
-
-    def update(self, x, y):
-        self.pX.append(x)
-        self.py.append(float(y))
-        if len(self.pX) >= RETRAIN_EVERY:
-            try:
-                self.reg.partial_fit(np.array(self.pX), np.array(self.py))
-                self.trained = True
-            except Exception as e:
-                print(f"sgd partial_fit: {e}")
-            self.pX.clear()
-            self.py.clear()
-
-    def predict(self, x):
-        if not self.trained:
-            return None
-        try:
-            return float(self.reg.predict(x.reshape(1, -1))[0])
-        except Exception:
-            return None
-
-    def serialize(self):
-        return {"trained": self.trained,
-                "reg": self.reg if self.trained else None}
-
-    def load_state(self, data):
-        super().load_state(data)
-        if data.get("reg") is not None:
-            self.reg = data["reg"]
-
-
 class RLSModel(BaseModel):
     kind = "feat"
 
@@ -639,7 +594,9 @@ class EnsembleModel(BaseModel):
     def serialize(self):
         member_mae = {}
         for m in self.members:
-            if m.roll.n >= 2:
+            if self.static_mae and m.name in self.static_mae:
+                member_mae[m.name] = float(self.static_mae[m.name])
+            elif m.roll.n >= 2:
                 member_mae[m.name] = float(m.roll.mae())
             else:
                 member_mae[m.name] = 1.0
@@ -655,7 +612,7 @@ def make_models(include_seq=None):
     """Build a fresh (untrained) model set. include_seq=None auto-detects torch."""
     if include_seq is None:
         include_seq = HAS_TORCH
-    models = [SGDModel(), RLSModel(), RFModel()]
+    models = [RLSModel(), RFModel()]
     if include_seq and HAS_TORCH:
         models.append(TorchSeqModel("LSTM", COL_LSTM, 3, "lstm"))
         models.append(TorchSeqModel("GRU",  COL_GRU,  3, "gru"))
