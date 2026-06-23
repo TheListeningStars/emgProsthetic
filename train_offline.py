@@ -44,6 +44,32 @@ if HAS_TORCH:
     import torch
 
 
+# ====== DEVICE SELECTION ====================================================
+def pick_device(name="auto"):
+    """Returns a torch.device. Falls back to CPU if requested device is unavailable."""
+    if not HAS_TORCH:
+        return None
+    name = (name or "auto").lower()
+    if name == "cpu":
+        return torch.device("cpu")
+    if name == "cuda":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        print("[device] cuda requested but unavailable -> cpu")
+        return torch.device("cpu")
+    if name == "mps":
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        print("[device] mps requested but unavailable -> cpu")
+        return torch.device("cpu")
+    # auto
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 # ====== CSV LOADING =========================================================
 def _raw_path_for(main_csv):
     base, ext = os.path.splitext(main_csv)
@@ -203,15 +229,23 @@ def train_rf(model, xn, ys):
     model.fit_now(xn[-n:], ys[-n:])
 
 
-def train_seq(model, rn, ys, norms, epochs, batch_size=SEQ_BATCH):
+def train_seq(model, rn, ys, norms, epochs, batch_size=SEQ_BATCH, device=None):
     n = len(rn)
-    print(f"  {model.name}: {epochs} epochs over {n} samples, "
+    device = device or torch.device("cpu")
+    print(f"  {model.name}: {epochs} epochs over {n} samples on {device}, "
           f"hidden={lc.SEQ_HIDDEN} layers={lc.SEQ_LAYERS} batch={batch_size}")
+
+    # move net to device + recreate optimizer (so Adam state lives on the same device)
+    model.net.to(device)
+    model.opt = torch.optim.Adam(model.net.parameters(),
+                                 lr=lc.SEQ_LR, weight_decay=lc.SEQ_WD)
+
     mean = norms.t_mean
     std = norms.t_std
     ys_norm = ((ys - mean) / std).astype(np.float32)
-    rn_t = torch.from_numpy(rn.astype(np.float32))
-    ys_t = torch.from_numpy(ys_norm)
+    rn_t = torch.from_numpy(rn.astype(np.float32)).to(device)
+    ys_t = torch.from_numpy(ys_norm).to(device)
+
     last_loss = float("nan")
     for ep in range(epochs):
         idx = np.random.permutation(n)
@@ -230,6 +264,13 @@ def train_seq(model, rn, ys, norms, epochs, batch_size=SEQ_BATCH):
         last_loss = float(np.mean(losses))
         if ep == 0 or (ep + 1) % max(1, epochs // 5) == 0 or ep == epochs - 1:
             print(f"     ep {ep+1}/{epochs}  loss={last_loss:.4f}")
+
+    # move back to CPU so model.predict() works under the existing CPU-only
+    # contract used by eval, save_bundle, live_deploy, and live_train.
+    if device.type != "cpu":
+        model.net.to(torch.device("cpu"))
+        model.opt = torch.optim.Adam(model.net.parameters(),
+                                     lr=lc.SEQ_LR, weight_decay=lc.SEQ_WD)
     model.trained = True
     model.extra = f"loss={last_loss:.3f}"
 
@@ -312,7 +353,8 @@ def train_at_horizon(loaded_sessions, horizon_s, args):
         print("  training sequence nets...")
         for m in models:
             if m.kind == "seq":
-                train_seq(m, tr_rn, tr_y, norms, epochs=args.epochs)
+                train_seq(m, tr_rn, tr_y, norms, epochs=args.epochs,
+                          device=args.device_obj)
 
     # set ensemble static weights based on VAL MAE (more honest than train).
     # Falls back to train MAE if there's no val data.
@@ -368,11 +410,24 @@ def parse_args():
     p.add_argument("--horizons", default=None,
                    help='comma-separated horizon sweep, e.g. "0.05,0.10,0.15,0.20" '
                         "— in sweep mode no bundle is saved")
+    p.add_argument("--device", default="auto",
+                   choices=["auto", "cpu", "cuda", "mps"],
+                   help="device for LSTM/GRU training. Default auto "
+                        "(cuda > mps > cpu). Model is moved back to CPU "
+                        "before save so deploy stays CPU-only.")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
+    args.device_obj = pick_device(args.device) if HAS_TORCH else None
+    if HAS_TORCH:
+        # If we're on CPU, let torch use all cores (live_common pinned it to 1
+        # to keep the camera loop snappy, but for offline training we want speed).
+        if args.device_obj.type == "cpu":
+            torch.set_num_threads(max(1, os.cpu_count() or 1))
+        print(f"[device] using {args.device_obj} "
+              f"(torch threads={torch.get_num_threads()})")
 
     print("Loading sessions...")
     loaded = []
