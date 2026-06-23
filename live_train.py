@@ -63,6 +63,10 @@ ANGLE_MIN_DEG = 90.0
 ANGLE_MAX_DEG = 180.0
 SERVO_INVERT = True   # flip if your servo horn is mounted reversed
 
+# Anti-jitter for the servo command (live-tunable trackbars below override these).
+SERVO_SMOOTH_DEFAULT = 5    # EMA window N: alpha = 1/N. 1 = off, larger = smoother.
+SERVO_SLEW_DEFAULT   = 0    # max deg change per command. 0 = disabled.
+
 # ====== LOGGING / MODELS DIR ================================================
 os.makedirs("logs/liveTrain", exist_ok=True)
 os.makedirs("models", exist_ok=True)
@@ -255,8 +259,40 @@ def snapshot_emg():
     return t_end, feat, raw
 
 
-# ====== SERVO SELECTION =====================================================
+# ====== SERVO SELECTION + ANTI-JITTER STATE =================================
 servo_select = {"idx": len(DISPLAY) - 1, "name": DISPLAY[-1].name}
+servo_state  = {"smooth_window": SERVO_SMOOTH_DEFAULT,
+                "slew_max":      SERVO_SLEW_DEFAULT,
+                "smoothed":      None,
+                "last_sent":     None,
+                "sel_tracked":   None}
+
+
+def servo_command(raw_pred, sel_name):
+    """Apply EMA + optional slew limit to the raw prediction before sending."""
+    if raw_pred is None or not np.isfinite(raw_pred):
+        return
+    # if model changed, drop the smoother state so we don't carry old values.
+    if servo_state["sel_tracked"] != sel_name:
+        servo_state["smoothed"] = None
+        servo_state["last_sent"] = None
+        servo_state["sel_tracked"] = sel_name
+
+    win = max(1, int(servo_state["smooth_window"]))
+    alpha = 1.0 / win
+    prev = servo_state["smoothed"]
+    sm = float(raw_pred) if prev is None else (alpha * raw_pred + (1 - alpha) * prev)
+    servo_state["smoothed"] = sm
+
+    slew_max = float(servo_state["slew_max"])
+    if slew_max > 0 and servo_state["last_sent"] is not None:
+        delta = sm - servo_state["last_sent"]
+        if delta > slew_max:
+            sm = servo_state["last_sent"] + slew_max
+        elif delta < -slew_max:
+            sm = servo_state["last_sent"] - slew_max
+    servo_state["last_sent"] = sm
+    send_angle(sm)
 
 # ====== TRAINER THREAD ======================================================
 window_hist = deque(maxlen=WINDOW_HIST_MAX)
@@ -351,7 +387,7 @@ def trainer():
                 sel_name = servo_select["name"]
                 for m in DISPLAY:
                     if m.name == sel_name:
-                        send_angle(m.last_pred)
+                        servo_command(m.last_pred, sel_name)
                         break
 
         time.sleep(TRAIN_TICK_S)
@@ -590,6 +626,20 @@ def _on_servo_src(idx):
 cv2.createTrackbar("Servo src", WIN_NAME,
                    servo_select["idx"], len(DISPLAY) - 1, _on_servo_src)
 
+
+def _on_smooth(v):
+    servo_state["smooth_window"] = max(1, int(v))
+
+
+def _on_slew(v):
+    servo_state["slew_max"] = float(v)
+
+
+# Anti-jitter knobs.  Smooth = EMA window N (1 = off, larger = smoother).
+# Slew = max degrees per command (0 = disabled).
+cv2.createTrackbar("Smooth", WIN_NAME, SERVO_SMOOTH_DEFAULT, 30, _on_smooth)
+cv2.createTrackbar("Slew",   WIN_NAME, SERVO_SLEW_DEFAULT,   60, _on_slew)
+
 click_points = []
 CLICK_LABELS = ["shin", "ankle", "foot"]
 CLICK_SNAP_PX = 40
@@ -748,8 +798,9 @@ try:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
 
             cv2.putText(frame,
-                        f"SERVO source: {servo_select['name']}   "
-                        f"(trackbar or 1..{len(DISPLAY)})   S=save",
+                        f"SERVO src: {servo_select['name']}   "
+                        f"smooth={servo_state['smooth_window']}   "
+                        f"slew={servo_state['slew_max']:.0f}deg   S=save",
                         (20, base_y + 28),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (240, 240, 240), 2)
 
