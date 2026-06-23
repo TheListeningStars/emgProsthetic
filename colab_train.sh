@@ -120,10 +120,13 @@ cat <<PY | colab exec -s "$SESSION"
 import os, subprocess, sys, json
 os.chdir('$REMOTE_DIR')
 args = json.loads(r'''$ARGS_JSON''')
-cmd = [sys.executable, 'train_offline.py'] + args
+cmd = [sys.executable, '-u', 'train_offline.py'] + args  # -u = unbuffered
 print('>>>', ' '.join(cmd))
 sys.stdout.flush()
-sys.exit(subprocess.run(cmd).returncode)
+env = os.environ.copy()
+env['PYTHONUNBUFFERED'] = '1'
+env['TQDM_MININTERVAL'] = '1.0'   # update at most once per second
+sys.exit(subprocess.run(cmd, env=env).returncode)
 PY
 
 echo ">> locating produced bundle"

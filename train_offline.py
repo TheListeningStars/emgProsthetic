@@ -31,6 +31,18 @@ from datetime import datetime
 
 import numpy as np
 
+try:
+    from tqdm import tqdm
+except Exception:
+    def tqdm(it=None, **kw):
+        return it if it is not None else _Noop()
+    class _Noop:
+        def update(self, *a, **k): pass
+        def set_postfix(self, *a, **k): pass
+        def close(self): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
 import live_common as lc
 from live_common import (
     Normalizers, features_from_arr, make_models, save_bundle,
@@ -151,7 +163,8 @@ def build_pairs(samples, angles, horizon_s, tol_s=0.05, step=1):
     ang_ts = angles[:, 0]
 
     feats, raws, ys = [], [], []
-    for end in range(EMG_WINDOW, len(samples) + 1, step):
+    ends = range(EMG_WINDOW, len(samples) + 1, step)
+    for end in tqdm(ends, desc="  pairing", unit="win", leave=False):
         win = samples[end - EMG_WINDOW:end]   # (T, 1+N_CH)
         t_end = float(win[-1, 0])
         target_t = t_end + horizon_s
@@ -218,7 +231,7 @@ def normalize_all(feats, raws, norms):
 
 def train_rls(model, xn, ys):
     print(f"  RLS: single pass over {len(xn)} samples")
-    for i in range(len(xn)):
+    for i in tqdm(range(len(xn)), desc="    RLS", unit="sample", leave=False):
         model.update(xn[i], float(ys[i]))
 
 
@@ -247,7 +260,8 @@ def train_seq(model, rn, ys, norms, epochs, batch_size=SEQ_BATCH, device=None):
     ys_t = torch.from_numpy(ys_norm).to(device)
 
     last_loss = float("nan")
-    for ep in range(epochs):
+    bar = tqdm(range(epochs), desc=f"    {model.name}", unit="ep")
+    for ep in bar:
         idx = np.random.permutation(n)
         losses = []
         for s in range(0, n, batch_size):
@@ -262,8 +276,8 @@ def train_seq(model, rn, ys, norms, epochs, batch_size=SEQ_BATCH, device=None):
             model.opt.step()
             losses.append(loss.item())
         last_loss = float(np.mean(losses))
-        if ep == 0 or (ep + 1) % max(1, epochs // 5) == 0 or ep == epochs - 1:
-            print(f"     ep {ep+1}/{epochs}  loss={last_loss:.4f}")
+        bar.set_postfix(loss=f"{last_loss:.4f}")
+    bar.close()
 
     # move back to CPU so model.predict() works under the existing CPU-only
     # contract used by eval, save_bundle, live_deploy, and live_train.
@@ -276,11 +290,14 @@ def train_seq(model, rn, ys, norms, epochs, batch_size=SEQ_BATCH, device=None):
 
 
 # ====== EVAL ===============================================================
-def model_mae(model, xn, rn, ys):
+def model_mae(model, xn, rn, ys, desc=None):
     if len(ys) == 0:
         return float("nan")
     preds = []
-    for i in range(len(ys)):
+    it = tqdm(range(len(ys)),
+              desc=desc or f"    eval {model.name}",
+              unit="sample", leave=False)
+    for i in it:
         inp = xn[i] if model.kind == "feat" else rn[i]
         p = model.predict(inp)
         preds.append(p if p is not None else np.nan)
@@ -297,7 +314,8 @@ def ensemble_mae(ensemble, members, xn, rn, ys, use_train_weights=True):
     if len(ys) == 0:
         return float("nan")
     preds = []
-    for i in range(len(ys)):
+    for i in tqdm(range(len(ys)), desc="    eval ENS",
+                  unit="sample", leave=False):
         per = {}
         for m in members:
             inp = xn[i] if m.kind == "feat" else rn[i]
