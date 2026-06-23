@@ -182,16 +182,16 @@ resulting bundle, and tears the VM down.
 uv tool install google-colab-cli
 colab auth   # first run only
 
-# train on an A100:
+# train on the default T4:
 ./colab_train.sh logs/liveTrain/arsh_live_train_20260622_182226.csv \
                  -- --epochs 80 --horizon 0.15
 
-# sweep horizons on an H100:
-./colab_train.sh --gpu H100 logs/liveTrain/*.csv \
+# sweep horizons on an A100:
+./colab_train.sh --gpu A100 logs/liveTrain/*.csv \
                  -- --horizons "0.05,0.10,0.15,0.20"
 ```
 
-Flags: `--gpu {T4|L4|A100|H100}` (default A100), `--session NAME` (default
+Flags: `--gpu {T4|L4|A100|H100}` (default T4), `--session NAME` (default
 `emg`), `--no-stop` to keep the VM alive after training.  Everything after
 `--` is forwarded to `train_offline.py`.
 

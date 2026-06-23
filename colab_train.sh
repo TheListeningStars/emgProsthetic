@@ -14,7 +14,7 @@
 #   ./colab_train.sh [OPTIONS] SESSION_CSV [SESSION_CSV ...] -- [train_offline args]
 #
 # Options:
-#   --gpu GPU         T4, L4, A100, H100. Default: A100
+#   --gpu GPU         T4, L4, A100, H100. Default: T4
 #   --session NAME    Colab session name. Default: emg
 #   --no-stop         Leave the VM running after training
 #   -h, --help        Show this help
@@ -26,7 +26,7 @@
 set -euo pipefail
 
 SESSION="emg"
-GPU="A100"
+GPU="T4"
 KEEP=0
 POSITIONAL=()
 EXTRA_ARGS=()
