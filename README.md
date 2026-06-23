@@ -166,6 +166,35 @@ Each session CSV's matching `_emg_raw.csv` is found automatically.  Output
 bundle: `models/bundle_offline_<TS>.pkl` (loadable by `live_deploy.py`),
 with the trained horizon recorded in the bundle's `meta`.
 
+GPU support: `train_offline.py` auto-detects CUDA / MPS / CPU and runs
+LSTM+GRU on the best available.  Force a device with
+`--device {auto|cpu|cuda|mps}`.  The net is moved back to CPU before save
+so bundles stay portable.
+
+### 3a. Train on Google Colab GPU  (`colab_train.sh`)
+
+If you don't have a local GPU, the `colab_train.sh` helper uploads code +
+sessions to a Colab VM, runs `train_offline.py` there, downloads the
+resulting bundle, and tears the VM down.
+
+```bash
+# one-time install of Google's official Colab CLI:
+uv tool install google-colab-cli
+colab auth   # first run only
+
+# train on an A100:
+./colab_train.sh logs/liveTrain/arsh_live_train_20260622_182226.csv \
+                 -- --epochs 80 --horizon 0.15
+
+# sweep horizons on an H100:
+./colab_train.sh --gpu H100 logs/liveTrain/*.csv \
+                 -- --horizons "0.05,0.10,0.15,0.20"
+```
+
+Flags: `--gpu {T4|L4|A100|H100}` (default A100), `--session NAME` (default
+`emg`), `--no-stop` to keep the VM alive after training.  Everything after
+`--` is forwarded to `train_offline.py`.
+
 ## Notes / knobs
 
 - `EMG_WINDOW = 75` (~1.2 s of context at 63.46 Hz).  Change in
