@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .DS_Store
-logs/
+logs/*
+!logs/liveTrain/
 models/
 .claude/
